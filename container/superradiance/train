@@ -17,6 +17,7 @@ from utils import kronecker_product, SparseIndices
 from scipy import sparse
 
 
+
 import pandas as pd
 
 from sklearn import tree
@@ -43,9 +44,14 @@ def train():
     try:        
         #########################################
         #constants
-
+        
         datatype = tf.complex128
-        N = 3 # Number of nuclear spins
+        
+        with open(param_path, 'r') as tc:
+             trainingParams = json.load(tc)
+        N = int(trainingParams.get('N', None))  
+        steps = int(trainingParams.get('steps', None))
+
         dim = 2**(N+1) # Dimension of Hilbert space of N nuclear and 1 electronic spin
 
         Amean = 1
@@ -88,12 +94,12 @@ def train():
 
 
 
+            
         #########################################
         #Initial state
-
-        rhoI = sparse.csr_matrix(([1.],([0],[0])),shape =(int(dim/2),int(dim/2)))
-        rhoS = sparse.csr_matrix(([1.],([1],[1])),shape =(2,2))
-        sparse_rho =sparse.kron(rhoS, rhoI)
+        print(os.listdir(training_path))
+            
+        sparse_rho = pickle.load(open(os.path.join(training_path, 'init.pckl'), "rb"))
 
         rho_ind = SparseIndices(sparse_rho)
         rho2 = tf.sparse_to_dense(rho_ind['indices'], rho_ind['dense_shape'], rho_ind['values']) # Hack because sparse_to_dense not implemented for complex
@@ -118,7 +124,7 @@ def train():
         increment_global_step_op = tf.assign(global_step, global_step+1)
         
 
-        steps = 10
+
         polarization = np.zeros(steps)
         init = tf.global_variables_initializer()
         with tf.Session() as sess:
@@ -128,8 +134,10 @@ def train():
 
                 _ , polarization[i] = sess.run([step, pol], feed_dict={eps:0.3})
         intensity = -np.diff(polarization)
+        out= {'intensity': intensity, 'I_ind': I_ind}
         
-        np.save(os.path.join(model_path, 'intensity.npy'),intensity)
+        pickle.dump(out, open(os.path.join(model_path, 'out.pckl'), "wb"))
+        #np.save(os.path.join(model_path, 'intensity.npy'),intensity)
         print('Training complete.')
         
     
