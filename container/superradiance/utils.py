@@ -11,6 +11,7 @@ def kronecker_product(mat1, mat2):
     return array_ops.reshape(mat1_rsh * mat2_rsh, [m1 * m2, n1 * n2])
 
 def SparseIndices(X):
+    """Retrieves indices, values, and dense_shape from a numpy sparse matrix"""
     indicesT = X.nonzero()
     indices = np.transpose(indicesT)
     values = X.data
