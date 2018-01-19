@@ -10,17 +10,18 @@ import sys
 import traceback
 import tensorflow as tf
 import numpy as np
-from utils import kronecker_product, SparseIndices
-from scipy import sparse
-import pandas as pd
+from utils import kronecker_product, SparseIndices               
+from scipy import sparse                                          
+import pandas as pd                                               
 
 # These are the paths to where SageMaker mounts interesting things in your container.
 
 prefix = '/opt/ml/'
 
 input_path = prefix + 'input/data'
-output_path = os.path.join(prefix, 'output')                       # failure output & error messages should be written here
-model_path = os.path.join(prefix, 'model')                         # All results should be written here
+
+output_path = os.path.join(prefix, 'output')                       # Failure output & error messages should be written here
+model_path = os.path.join(prefix, 'model')                         # All results should be written here 
 param_path = os.path.join(prefix, 
                           'input/config/hyperparameters.json')     # Passed parameters can be retrieved here
 
@@ -35,20 +36,27 @@ training_path = os.path.join(input_path, channel_name)              # The initia
 def train():
     print('Starting the training.')
     try:        
-        #########################################
-        # retrieve parameters
+        ##################################################################################
+        # Retrieve parameters
+        ##################################################################################
+        # Parameters that were defined in the hyperparameter dict in the notebook 
+        # (in our example: superradiance.hyperparam_dict = {'N': N, 'steps': steps})  
+        # can be retrieved from the param_path defined above. 
+        # Note that the parameters are stored as a JSON string, so it is required to 
+        # define the correct dtype upon reading (here: int).
         
         datatype = tf.complex128
         
-        with open(param_path, 'r') as tc:
+        with open(param_path, 'r') as tc: 
              trainingParams = json.load(tc)
         N = int(trainingParams.get('N', None))          # Number of simulated nuclear spins as defined in notebook
         steps = int(trainingParams.get('steps', None))  # Number of simulated time steps
 
         dim = 2**(N+1)                                  # Dimension of Hilbert space of N nuclear and 1 electronic spin
         
-        ########################################
-        # define some other parameters
+        #################################################################################
+        # Define some other parameters
+        ##################################################################################
         
         Amean = 1
         gamma = 1
@@ -56,32 +64,35 @@ def train():
         g = np.ones(N)
         g = g/(np.sqrt((g**2).sum()))                    # Coupling strengts
         A = Amean/g.sum()
-        I_ind = np.real(A**2/(gamma+1j*Amean))*2/N       # Classical emission intensity of N independent emitters (benchmark)
+        I_ind = np.real(A**2/(gamma+1j*Amean))*2/N       # Classical emission intensity of N independent emitters (benchmark)        
         
+        ##################################################################################
+        # Define TF constants
+        ##################################################################################
         
-        #########################################
-        # define TF constants
         gammaT = tf.constant(gamma, dtype=datatype)
         AT = tf.constant(A, dtype=datatype)
         eps = tf.placeholder(dtype=datatype, shape=())
 
-        #########################################
-        # define Pauli Matrices
+        ##################################################################################
+        # Define 'Pauli Matrices'
+        ##################################################################################
 
         sigmaz = tf.constant([[1/2, 0], [0, -1/2]], dtype= datatype)
         splus  = tf.constant([[0, 1], [0, 0]], dtype = datatype)
         sminus = tf.constant([[0, 0], [1, 0]], dtype = datatype)
 
-
-        #########################################
+        ##################################################################################
         # Electron Spin operators 
+        ##################################################################################
 
         Sm = kronecker_product(sminus, tf.eye(int(dim/2), dtype = datatype))
         Sp = tf.transpose(Sm)
         Sz = kronecker_product(sigmaz, tf.eye(int(dim/2), dtype = datatype))
 
-        #########################################
+        ##################################################################################
         # Nuclear Spin operators 
+        ##################################################################################
 
         Am = tf.zeros(int(dim/2), dtype = datatype)
         Iz = tf.zeros(int(dim/2), dtype = datatype)
@@ -94,26 +105,28 @@ def train():
         Am = kronecker_product(tf.eye(2, dtype = datatype),Am)
         Ap = tf.transpose(Am)
         Iz = kronecker_product(tf.eye(2, dtype = datatype),Iz)
-
-
-
             
-        #########################################
+        ##################################################################################
         # Load and construct Initial State
+        ##################################################################################
+        # You can pass on larger data structures to your program by placing them on S3 and 
+        # and point to the location at execution time.
+        # (in our example: superradiance.fit("s3://sagemaker-kessle31/superradiance/initial_state")
+        # It can be retrieved from the 'training_path' location defined above.           
             
         sparse_rho = pickle.load(open(os.path.join(training_path, 'init.pckl'), "rb"))
 
         rho_ind = SparseIndices(sparse_rho)
         rho2 = tf.sparse_to_dense(rho_ind['indices'], 
                                   rho_ind['dense_shape'], 
-                                  rho_ind['values'])         # Sparse_to_dense not implemented for complex 
-                                                             # => Construct Re an Im separately
+                                  rho_ind['values'])         # Sparse_to_dense not implemented for complex at time of this 
+                                                             # notebook => Construct Real an Imag separately
         rho1 = tf.complex(rho2,tf.zeros(rho_ind['dense_shape'], dtype=tf.float64))
         rho = tf.Variable(rho1, dtype=datatype)  
 
-
-        ########################################
+        ##################################################################################
         # Define Operations
+        ##################################################################################
         
         H = 0.5 * AT * (tf.matmul(Sp,Am) + tf.matmul(Sm,Ap))  # Define the Hamiltonian of the system
         
@@ -124,15 +137,16 @@ def train():
             
         rho_ = rho + eps * IL                                 # Evolve the system by one time step
         
-        pol = tf.real(tf.trace(tf.matmul(rho, Iz)))           # Compute the polarization of the nuclear syste,
+        pol = tf.real(tf.trace(tf.matmul(rho, Iz)))           # Compute the polarization of the nuclear system,
 
         global_step = tf.train.get_or_create_global_step()
         increment_global_step_op = tf.assign(global_step, global_step+1)
         
         step = tf.group(rho.assign(rho_),increment_global_step_op) 
         
-        ########################################
-        # Run the Simulation         
+        ##################################################################################
+        # Run the Simulation     
+        ##################################################################################
         
         polarization = np.zeros(steps)        
         init = tf.global_variables_initializer()
@@ -141,10 +155,15 @@ def train():
             for i in range(steps):
                 _ , polarization[i] = sess.run([step, pol], feed_dict={eps:0.3})
                 
-        ########################################
+        ##################################################################################
         # Compute output and dump to pickle                       
-                                
-        intensity = -np.diff(polarization)
+        ##################################################################################                       
+        # Everything written into the 'model_path' location defined above will be
+        # returned by SageMAker to the S3 location defined in the notebook 
+        # (in our example: output_path="s3://sagemaker-kessle31/superradiance/output")
+        # Note that the files will be returned as a tar.gz archive       
+        
+        intensity = -np.diff(polarization)                                  
         out= {'intensity': intensity, 'I_ind': I_ind}
         pickle.dump(out, open(os.path.join(model_path, 'out.pckl'), "wb"))
         
