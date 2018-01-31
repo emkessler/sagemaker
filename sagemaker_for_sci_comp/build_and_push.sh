@@ -7,7 +7,7 @@
 # machine and combined with the account and region to form the repository name for ECR.
 image=$1
 
-chmod +x superradiance/train
+chmod +x container/superradiance/train
 
 if [ "$image" == "" ]
 then
@@ -48,13 +48,7 @@ $(aws ecr get-login --region ${region} --no-include-email)
 # Build the docker image locally with the image name and then push it to ECR
 # with the full name.
 
-# On a SageMaker Notebook Instance, the docker daemon may need to be restarted in order
-# to detect your network configuration correctly.  (This is a known issue.)
-if [ -d "/home/ec2-user/SageMaker" ]; then
-  sudo service docker restart
-fi
-
-docker build  -t ${image} .
+docker build  -t ${image} -f container/Dockerfile .
 docker tag ${image} ${fullname}
 
 docker push ${fullname}
